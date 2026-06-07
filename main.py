@@ -12,5 +12,3 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
-Fijate que las líneas con await adentro de las funciones tienen 4 espacios al principio. ¿Podés borrar todo y pegarlo de nuevo?Sonnet 4.6 Bajo

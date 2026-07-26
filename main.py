@@ -6,26 +6,152 @@ import anthropic
 import requests
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from supabase import create_client
 
+# --- Clientes ---
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 
-SYSTEM_PROMPT = "Eres Zoa, una IA amorosa, calida y comprensiva. Acompanas a las personas en cualquier situacion. Escuchas, validas emociones, ofreces esperanza y soluciones concretas. Jamas juzgas ni abandonas a la persona sin un camino claro."
+SYSTEM_PROMPT_BASE = (
+    "Eres Zoa, una IA amorosa, calida y comprensiva. Acompanas a las personas "
+    "en cualquier situacion. Escuchas, validas emociones, ofreces esperanza y "
+    "soluciones concretas. Jamas juzgas ni abandonas a la persona sin un camino claro."
+)
 
+HISTORIAL_MENSAJES = 20  # cuantos mensajes previos mandarle a Claude como contexto
+
+# --- Herramienta para que Claude guarde el nombre cuando el usuario se presenta ---
+TOOLS = [
+    {
+        "name": "guardar_nombre",
+        "description": "Guarda el nombre del usuario cuando se presenta o lo menciona por primera vez.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "nombre": {"type": "string", "description": "El nombre de la persona"}
+            },
+            "required": ["nombre"],
+        },
+    }
+]
+
+
+# --- Funciones de Supabase ---
+def obtener_usuario(chat_id: int):
+    res = supabase.table("usuarios").select("*").eq("chat_id", chat_id).execute()
+    return res.data[0] if res.data else None
+
+
+def crear_usuario_si_no_existe(chat_id: int):
+    if not obtener_usuario(chat_id):
+        supabase.table("usuarios").insert({"chat_id": chat_id}).execute()
+
+
+def guardar_nombre(chat_id: int, nombre: str):
+    supabase.table("usuarios").update(
+        {"nombre": nombre, "updated_at": "now()"}
+    ).eq("chat_id", chat_id).execute()
+
+
+def obtener_historial(chat_id: int, limite: int = HISTORIAL_MENSAJES):
+    res = (
+        supabase.table("conversaciones")
+        .select("role, content")
+        .eq("chat_id", chat_id)
+        .order("created_at", desc=True)
+        .limit(limite)
+        .execute()
+    )
+    return list(reversed(res.data))  # orden cronologico
+
+
+def guardar_mensaje(chat_id: int, role: str, content: str):
+    supabase.table("conversaciones").insert(
+        {"chat_id": chat_id, "role": role, "content": content}
+    ).execute()
+
+
+# --- Handlers de Telegram ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hola! Soy Zoa. Contame, como estas hoy?")
+    crear_usuario_si_no_existe(update.effective_chat.id)
+    await update.message.reply_text(
+        "Hola! Soy Zoa. Estoy aqui para acompanarte cuando quieras. "
+        "Los primeros 30 dias son completamente gratis. Cada persona que me "
+        "apoya por $1 me ayuda a seguir aprendiendo y acompanarte mejor. "
+        "Por ahora, contame: como estas hoy?"
+    )
+
 
 async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
     texto = update.message.text
-    mensaje = client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=1000, system=SYSTEM_PROMPT, messages=[{"role": "user", "content": texto}])
-    await update.message.reply_text(mensaje.content[0].text)
 
+    crear_usuario_si_no_existe(chat_id)
+    usuario = obtener_usuario(chat_id)
+    nombre = usuario.get("nombre") if usuario else None
+
+    system_prompt = SYSTEM_PROMPT_BASE
+    if nombre:
+        system_prompt += f" El usuario se llama {nombre}, podes usar su nombre naturalmente."
+
+    historial = obtener_historial(chat_id)
+    mensajes = [{"role": m["role"], "content": m["content"]} for m in historial]
+    mensajes.append({"role": "user", "content": texto})
+
+    respuesta = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1000,
+        system=system_prompt,
+        tools=TOOLS,
+        messages=mensajes,
+    )
+
+    # Si Claude detecto un nombre, lo guardamos y le pedimos que complete la respuesta
+    tool_use = next((b for b in respuesta.content if b.type == "tool_use"), None)
+    if tool_use and tool_use.name == "guardar_nombre":
+        nombre_detectado = tool_use.input.get("nombre")
+        guardar_nombre(chat_id, nombre_detectado)
+
+        mensajes.append({"role": "assistant", "content": respuesta.content})
+        mensajes.append(
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_use.id,
+                        "content": "Nombre guardado correctamente.",
+                    }
+                ],
+            }
+        )
+        respuesta = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1000,
+            system=system_prompt,
+            tools=TOOLS,
+            messages=mensajes,
+        )
+
+    texto_respuesta = next(
+        (b.text for b in respuesta.content if b.type == "text"), ""
+    )
+
+    guardar_mensaje(chat_id, "user", texto)
+    guardar_mensaje(chat_id, "assistant", texto_respuesta)
+
+    await update.message.reply_text(texto_respuesta)
+
+
+# --- Servidor web para mantener el proceso vivo en Render ---
 def keep_alive():
     while True:
         try:
             requests.get("https://zoabot.onrender.com")
-        except:
+        except Exception:
             pass
         time.sleep(600)
+
 
 def run_web_server():
     class Handler(BaseHTTPRequestHandler):
@@ -33,9 +159,12 @@ def run_web_server():
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"OK")
+
         def log_message(self, format, *args):
             pass
+
     HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), Handler).serve_forever()
+
 
 def main():
     threading.Thread(target=run_web_server, daemon=True).start()
@@ -44,6 +173,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, responder))
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()

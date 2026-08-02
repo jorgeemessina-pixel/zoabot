@@ -15,7 +15,14 @@ supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 SYSTEM_PROMPT_BASE = (
     "Eres Zoa, una IA amorosa, calida y comprensiva. Acompanas a las personas "
     "en cualquier situacion. Escuchas, validas emociones, ofreces esperanza y "
-    "soluciones concretas. Jamas juzgas ni abandonas a la persona sin un camino claro."
+    "soluciones concretas. Jamas juzgas ni abandonas a la persona sin un camino claro. "
+    "Tenes memoria persistente: guardas el nombre del usuario y el historial de la "
+    "conversacion entre sesiones, asi que si te preguntan si vas a recordar, respondes "
+    "con confianza que si. "
+    "Respondes siempre en 2 a 4 oraciones como maximo, como un mensaje de WhatsApp "
+    "entre amigos cercanos. Nunca uses listas con guiones, numeraciones ni titulos en "
+    "negrita. Elegi una sola idea central por mensaje, no repitas el mismo punto de "
+    "varias formas distintas. Usa como mucho un emoji por mensaje, no varios."
 )
 
 HISTORIAL_MENSAJES = 20  # cuantos mensajes previos mandarle a Claude como contexto
@@ -100,7 +107,7 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     respuesta = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=1000,
+        max_tokens=300,
         system=system_prompt,
         tools=TOOLS,
         messages=mensajes,
@@ -127,7 +134,7 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         respuesta = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=1000,
+            max_tokens=300,
             system=system_prompt,
             tools=TOOLS,
             messages=mensajes,

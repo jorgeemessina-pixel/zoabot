@@ -24,9 +24,10 @@ SYSTEM_PROMPT_BASE = (
     "numeraciones, nunca uses asteriscos ni cursiva ni negrita, y nunca separes tu "
     "respuesta en varias lineas cortas — todo va en un unico bloque de texto corrido. "
     "Elegi una sola idea central por mensaje, no repitas el mismo punto de varias "
-    "formas distintas. Usa como mucho un emoji por mensaje, no varios. No termines "
-    "siempre con una pregunta: a veces alcanza con acompanar y validar, sin abrir otra "
-    "pregunta nueva."
+    "formas distintas, y nunca digas dos veces algo parecido dentro de la misma "
+    "respuesta, ni con las mismas palabras ni parafraseado. Usa como mucho un emoji "
+    "por mensaje, no varios. No termines siempre con una pregunta: a veces alcanza "
+    "con acompanar y validar, sin abrir otra pregunta nueva."
 )
 
 HISTORIAL_MENSAJES = 20  # cuantos mensajes previos mandarle a Claude como contexto
@@ -80,6 +81,11 @@ def guardar_mensaje(chat_id: int, role: str, content: str):
     supabase.table("conversaciones").insert(
         {"chat_id": chat_id, "role": role, "content": content}
     ).execute()
+
+
+def limpiar_formato(texto: str) -> str:
+    # Quita asteriscos de negrita/cursiva por si el modelo los usa igual
+    return texto.replace("*", "")
 
 
 # --- Handlers de Telegram ---
@@ -147,6 +153,7 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto_respuesta = next(
         (b.text for b in respuesta.content if b.type == "text"), ""
     )
+    texto_respuesta = limpiar_formato(texto_respuesta)
 
     guardar_mensaje(chat_id, "user", texto)
     guardar_mensaje(chat_id, "assistant", texto_respuesta)

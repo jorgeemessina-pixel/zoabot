@@ -83,9 +83,29 @@ def guardar_mensaje(chat_id: int, role: str, content: str):
     ).execute()
 
 
+import difflib
+
+
 def limpiar_formato(texto: str) -> str:
     # Quita asteriscos de negrita/cursiva por si el modelo los usa igual
     return texto.replace("*", "")
+
+
+def quitar_repeticiones(texto: str) -> str:
+    # Corta oraciones que repiten (parafraseado incluido) una idea ya dicha antes
+    partes = [p.strip() for p in texto.replace("\n", " ").split(". ") if p.strip()]
+    resultado = []
+    for parte in partes:
+        es_repetida = any(
+            difflib.SequenceMatcher(None, parte.lower(), previa.lower()).ratio() > 0.55
+            for previa in resultado
+        )
+        if not es_repetida:
+            resultado.append(parte)
+    texto_final = ". ".join(resultado)
+    if texto_final and not texto_final.endswith((".", "!", "?", "💙")):
+        texto_final += "."
+    return texto_final
 
 
 # --- Handlers de Telegram ---
@@ -154,6 +174,7 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
         (b.text for b in respuesta.content if b.type == "text"), ""
     )
     texto_respuesta = limpiar_formato(texto_respuesta)
+    texto_respuesta = quitar_repeticiones(texto_respuesta)
 
     guardar_mensaje(chat_id, "user", texto)
     guardar_mensaje(chat_id, "assistant", texto_respuesta)

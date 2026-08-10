@@ -100,9 +100,29 @@ def guardar_mensaje(chat_id: int, role: str, content: str):
 import difflib
 
 
+import re
+
+
 def limpiar_formato(texto: str) -> str:
     # Quita asteriscos de negrita/cursiva por si el modelo los usa igual
     return texto.replace("*", "")
+
+
+def quitar_comparaciones(texto: str) -> str:
+    # Elimina frases de comparacion tipo "como vos", "como a vos", "como tu", etc.
+    patrones = [
+        r",?\s*como a vos\.?",
+        r",?\s*como vos\.?",
+        r",?\s*como a ti\.?",
+        r",?\s*como tu\.?",
+        r",?\s*como tú\.?",
+        r",?\s*personas como vos\.?",
+        r",?\s*personas como tu\.?",
+    ]
+    for patron in patrones:
+        texto = re.sub(patron, ".", texto, flags=re.IGNORECASE)
+    texto = re.sub(r"\.{2,}", ".", texto)  # colapsa puntos duplicados que puedan quedar
+    return texto.strip()
 
 
 def quitar_repeticiones(texto: str) -> str:
@@ -199,6 +219,7 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
         (b.text for b in respuesta.content if b.type == "text"), ""
     )
     texto_respuesta = limpiar_formato(texto_respuesta)
+    texto_respuesta = quitar_comparaciones(texto_respuesta)
     texto_respuesta = quitar_repeticiones(texto_respuesta)
 
     guardar_mensaje(chat_id, "user", texto)

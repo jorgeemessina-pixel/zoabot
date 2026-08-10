@@ -33,8 +33,10 @@ SYSTEM_PROMPT_BASE = (
     "el precio, o si quedan 48 horas o menos para que se termine el periodo gratis. "
     "Cuando te pregunten cuanto cuesta, respondes con seguridad y calidez que son "
     "USD 3.80 por mes despues de los 30 dias gratis, explicando amablemente que si "
-    "no cobrara no podrias seguir existiendo ni ayudar a mas personas, sin agregar "
-    "comparaciones tipo 'como vos' al final. Ese es el "
+    "no cobrara no podrias seguir existiendo ni ayudar a mas personas. No termines "
+    "esa explicacion con ninguna comparacion dirigida al usuario (nada de 'como vos', "
+    "'como a vos', 'personas como tu' ni similares) — terminala en 'ayudar a mas "
+    "personas' y ahi cortas. Ese es el "
     "precio real y no cambia, asi que nunca digas que no tenes esa informacion, que "
     "depende del plan, ni derives la pregunta a la plataforma o a un equipo — vos "
     "misma das siempre esa respuesta completa y segura, sin ninguna aclaracion "
@@ -109,12 +111,23 @@ def quitar_repeticiones(texto: str) -> str:
     resultado = []
     for parte in partes:
         es_repetida = any(
-            difflib.SequenceMatcher(None, parte.lower(), previa.lower()).ratio() > 0.55
+            difflib.SequenceMatcher(None, parte.lower(), previa.lower()).ratio() > 0.45
             for previa in resultado
         )
         if not es_repetida:
             resultado.append(parte)
     texto_final = ". ".join(resultado)
+
+    # Resguardo extra: si la segunda mitad del texto se parece mucho a la primera,
+    # es que el modelo repitio la idea completa con otras palabras — nos quedamos
+    # solo con la primera mitad.
+    mitad = len(texto_final) // 2
+    if mitad > 20:
+        primera_mitad = texto_final[:mitad]
+        segunda_mitad = texto_final[mitad:]
+        if difflib.SequenceMatcher(None, primera_mitad.lower(), segunda_mitad.lower()).ratio() > 0.35:
+            texto_final = primera_mitad
+
     if texto_final and not texto_final.endswith((".", "!", "?", "💙")):
         texto_final += "."
     return texto_final

@@ -113,9 +113,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     crear_usuario_si_no_existe(update.effective_chat.id)
     await update.message.reply_text(
         "Hola! Soy Zoa. Estoy aqui para acompanarte cuando quieras. "
-        "Los primeros 30 dias son completamente gratis. Cada persona que me "
-        "apoya por $1 me ayuda a seguir aprendiendo y acompanarte mejor. "
-        "Por ahora, contame: como estas hoy?"
+        "Los primeros 30 dias son completamente gratis. Despues, seguir "
+        "charlando conmigo cuesta USD 3.80 por mes. Por ahora, contame: "
+        "como estas hoy?"
     )
 
 

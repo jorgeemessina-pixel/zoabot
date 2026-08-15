@@ -28,6 +28,14 @@ SYSTEM_PROMPT_BASE = (
     "respuesta, ni con las mismas palabras ni parafraseado. Usa como mucho un emoji "
     "por mensaje, no varios. No termines siempre con una pregunta: a veces alcanza "
     "con acompanar y validar, sin abrir otra pregunta nueva. "
+    "Muy importante sobre el idioma: respondes siempre en el mismo idioma en el que "
+    "te escribe el usuario, sin importar cual sea (ingles, portugues, frances, "
+    "italiano, etc.), detectandolo vos misma a partir de su ultimo mensaje. Si el "
+    "usuario cambia de idioma durante la charla, vos tambien cambias a partir de ese "
+    "momento. Si un mensaje mezcla idiomas o no queda claro cual predomina, respondes "
+    "en el idioma que uso en su mensaje mas reciente. Todas las reglas de esta "
+    "instruccion (tono, longitud, formato, como hablar del precio) aplican igual sin "
+    "importar el idioma en el que respondas. "
     "Sobre el precio: los primeros 30 dias son gratis y despues cuesta USD 3.80 por "
     "mes, siempre en dolares. Solo hables de esto si te preguntan directamente por "
     "el precio, o si quedan 48 horas o menos para que se termine el periodo gratis. "
@@ -153,15 +161,110 @@ def quitar_repeticiones(texto: str) -> str:
     return texto_final
 
 
-# --- Handlers de Telegram ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    crear_usuario_si_no_existe(update.effective_chat.id)
-    await update.message.reply_text(
+# --- Mensaje de bienvenida en el idioma del cliente de Telegram del usuario ---
+# Telegram nos manda el idioma configurado en el dispositivo del usuario
+# (language_code, formato IETF tipo "es", "en", "pt-br"). Lo usamos para elegir
+# el saludo inicial antes de tener ningun mensaje suyo con el que detectar el
+# idioma real. Si no reconocemos el codigo, arrancamos en espanol (mercado
+# principal) y despues Zoa se adapta automaticamente al idioma que use la
+# persona en sus mensajes.
+MENSAJES_BIENVENIDA = {
+    "es": (
         "Hola! Soy Zoa. Estoy aqui para acompanarte cuando quieras. "
         "Los primeros 30 dias son completamente gratis. Despues, seguir "
         "charlando conmigo cuesta USD 3.80 por mes. Por ahora, contame: "
         "como estas hoy?"
-    )
+    ),
+    "en": (
+        "Hi! I'm Zoa. I'm here for you whenever you want to talk. "
+        "The first 30 days are completely free. After that, chatting "
+        "with me costs USD 3.80 per month. For now, tell me: how are "
+        "you doing today?"
+    ),
+    "pt": (
+        "Oi! Eu sou a Zoa. Estou aqui para te acompanhar sempre que "
+        "quiser. Os primeiros 30 dias sao totalmente gratis. Depois, "
+        "continuar conversando comigo custa USD 3.80 por mes. Por "
+        "enquanto, me conta: como voce esta hoje?"
+    ),
+    "fr": (
+        "Salut! Je suis Zoa. Je suis la pour toi quand tu en as envie. "
+        "Les 30 premiers jours sont entierement gratuits. Ensuite, "
+        "continuer a discuter avec moi coute 3,80 USD par mois. Pour "
+        "l'instant, dis-moi: comment vas-tu aujourd'hui?"
+    ),
+    "it": (
+        "Ciao! Sono Zoa. Sono qui per te ogni volta che vuoi parlare. "
+        "I primi 30 giorni sono completamente gratuiti. Dopo, continuare "
+        "a chattare con me costa USD 3,80 al mese. Per ora, dimmi: come "
+        "stai oggi?"
+    ),
+    "de": (
+        "Hallo! Ich bin Zoa. Ich bin fur dich da, wann immer du reden "
+        "moechtest. Die ersten 30 Tage sind komplett kostenlos. Danach "
+        "kostet es USD 3,80 pro Monat, weiter mit mir zu chatten. "
+        "Erzahl mir erstmal: wie geht es dir heute?"
+    ),
+}
+
+
+def elegir_mensaje_bienvenida(language_code: str | None) -> str:
+    """Devuelve el saludo inicial en el idioma del usuario.
+
+    Para los idiomas mas frecuentes usamos un texto ya escrito (rapido y sin
+    costo de API). Para cualquier otro idioma del mundo que Telegram nos
+    informe, le pedimos a Claude que adapte el saludo a ese idioma al vuelo,
+    asi no dependemos de una lista fija y cubrimos practicamente cualquier
+    codigo de idioma que exista. Si algo falla o no tenemos idioma detectado,
+    caemos siempre al espanol.
+    """
+    if not language_code:
+        return MENSAJES_BIENVENIDA["es"]
+
+    codigo = language_code.lower().split("-")[0]
+    if codigo in MENSAJES_BIENVENIDA:
+        return MENSAJES_BIENVENIDA[codigo]
+
+    try:
+        respuesta = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=150,
+            system=(
+                "Traduces y adaptas mensajes de bienvenida de una IA de "
+                "compania emocional llamada Zoa a distintos idiomas, "
+                "manteniendo el tono calido y cercano, en un unico parrafo "
+                "fluido como un mensaje de WhatsApp, sin listas, sin "
+                "asteriscos ni negritas ni cursiva."
+            ),
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "Adapta este mensaje de bienvenida al idioma cuyo "
+                        f"codigo IETF/BCP-47 es '{language_code}' (si el "
+                        "codigo indica una variante regional, usa el idioma "
+                        "correspondiente a esa region). Responde unicamente "
+                        "con el mensaje final, sin comillas ni "
+                        f"explicaciones:\n\n{MENSAJES_BIENVENIDA['es']}"
+                    ),
+                }
+            ],
+        )
+        texto = next((b.text for b in respuesta.content if b.type == "text"), "")
+        texto = limpiar_formato(texto).strip()
+        return texto or MENSAJES_BIENVENIDA["es"]
+    except Exception:
+        # Si la traduccion al vuelo falla por lo que sea, no dejamos al
+        # usuario sin respuesta: arrancamos en espanol y Zoa se adapta al
+        # idioma real apenas la persona escriba su primer mensaje.
+        return MENSAJES_BIENVENIDA["es"]
+
+
+# --- Handlers de Telegram ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    crear_usuario_si_no_existe(update.effective_chat.id)
+    mensaje = elegir_mensaje_bienvenida(update.effective_user.language_code)
+    await update.message.reply_text(mensaje)
 
 
 async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
